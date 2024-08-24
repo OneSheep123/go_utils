@@ -40,3 +40,5 @@ func ExampleNewConcurrentArrayBlockingQueue() {
 }
 
 ```
+
+另外internal/queue中ConcurrentArrayBlockingQueueV2是另外一种实现，使用semaphore包
