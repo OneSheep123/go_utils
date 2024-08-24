@@ -42,3 +42,21 @@ func ExampleNewConcurrentArrayBlockingQueue() {
 ```
 
 另外internal/queue中ConcurrentArrayBlockingQueueV2是另外一种实现，使用semaphore包
+
+
+## sync
+
+### once
+
+当前官方的包执行的方法中，不支持返回error，这里实现的once支持返回error，且当返回error时，once内的标志位重置
+
+使用方法：
+
+```go
+func main() {
+   err := once.Do(func() error {
+        xxxx // 相关业务逻辑
+        return nil
+   })
+}
+```
