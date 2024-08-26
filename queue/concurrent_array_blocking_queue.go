@@ -38,7 +38,7 @@ func (c *ConcurrentArrayBlockingQueue[T]) Dequeue(ctx context.Context) (T, error
 	c.mutex.Lock()
 	// 这里使用for，因为唤醒之后获取到锁这段过程中，队列可能又为空了
 	for c.size == 0 {
-		ch := c.readCond.singleCh()
+		ch := c.readCond.signalCh()
 		select {
 		case <-ctx.Done():
 			var t T
@@ -68,7 +68,7 @@ func (c *ConcurrentArrayBlockingQueue[T]) Enqueue(ctx context.Context, val T) er
 	c.mutex.Lock()
 	for c.size == len(c.data) {
 		// 注意：这里接下来要进行睡眠，因此里面会把锁释放
-		ch := c.writeCond.singleCh()
+		ch := c.writeCond.signalCh()
 		select {
 		case <-ctx.Done():
 			return ctx.Err()

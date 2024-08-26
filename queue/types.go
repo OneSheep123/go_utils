@@ -22,10 +22,10 @@ func newCond(l sync.Locker) *cond {
 	}
 }
 
-// singleCh 返回一个 channel，用于监听广播信号
+// signalCh 返回一个 channel，用于监听广播信号
 // 必须在锁范围内使用
 // 调用后，锁会被释放，这也是为了确保用户必然是在锁范围内调用的
-func (c *cond) singleCh() <-chan struct{} {
+func (c *cond) signalCh() <-chan struct{} {
 	res := c.single
 	c.l.Unlock()
 	return res
