@@ -10,6 +10,12 @@ go工具类
 1. NewArrayList 初始化一个len为0，cap为cap的ArrayList
 2. NewArrayListOf 直接使用传入的切片，而不会执行复制
 
+### linkedList
+
+LinkedList 是一个双向循环链表，所以非常适合频繁修改数据的场景, 其中
+1. NewLinkedList 初始化一个长度为0的链表
+2. NewLinkedListOf 根据传入的切片进行初始化链表
+
 ## queue
 
 并发阻塞队列意味着队列是并发安全的，并且是阻塞式的。所有实现都支持在以下情况阻塞：
