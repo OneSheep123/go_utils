@@ -88,6 +88,65 @@ func ExampleNewConcurrentLinkedBlockingQueue() {
 
 ```
 
+### 延时队列 DelayQueue
+
+DelayQueue，即延时队列。延时队列的运作机制是：
+
+- 按照元素的预期过期时间来进行排序，过期时间短的在前面；
+- 当从队列中获取元素的时候，如果队列为空，或者元素还没有到期，那么调用者会被阻塞；直到超时
+- 入队的时候，如果队列已经满了，那么调用者会被阻塞，直到有人取走元素，或者阻塞超时；
+因此延时队列的使用场景主要就是那些依赖于时间的场景，例如本地缓存，定时任务等。
+
+使用延时队列需要两个步骤：
+
+- 实现 Delayable 接口
+- 创建一个延时队列
+
+使用举例
+```go
+func ExampleNewDelayQueue() {
+	q := NewDelayQueue[delayElem](10)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancel()
+	now := time.Now()
+	_ = q.Enqueue(ctx, delayElem{
+		// 3 秒后过期
+		deadline: now.Add(time.Second * 3),
+		val:      3,
+	})
+
+	_ = q.Enqueue(ctx, delayElem{
+		// 2 秒后过期
+		deadline: now.Add(time.Second * 2),
+		val:      2,
+	})
+
+	_ = q.Enqueue(ctx, delayElem{
+		// 1 秒后过期
+		deadline: now.Add(time.Second * 1),
+		val:      1,
+	})
+
+	var vals []int
+	val, _ := q.Dequeue(ctx)
+	vals = append(vals, val.val)
+	val, _ = q.Dequeue(ctx)
+	vals = append(vals, val.val)
+	val, _ = q.Dequeue(ctx)
+	vals = append(vals, val.val)
+	fmt.Println(vals)
+	duration := time.Since(now)
+	if duration > time.Second*3 {
+		fmt.Println("delay!")
+	}
+	// Output:
+	// [1 2 3]
+	// delay!
+}
+```
+
+
+
 ## sync
 
 ### once
