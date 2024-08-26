@@ -2,6 +2,14 @@
 
 go工具类
 
+## list
+
+### ArrayList
+
+基于泛型实现的arrayList, 其中
+1. NewArrayList 初始化一个len为0，cap为cap的ArrayList
+2. NewArrayListOf 直接使用传入的切片，而不会执行复制
+
 ## queue
 
 并发阻塞队列意味着队列是并发安全的，并且是阻塞式的。所有实现都支持在以下情况阻塞：
