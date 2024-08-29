@@ -145,7 +145,32 @@ func ExampleNewDelayQueue() {
 }
 ```
 
+## cache
 
+## localCache
+本地缓存实现，其中对于过期键使用惰性删除和过期删除
+
+使用方法:
+```go
+func main() {
+   // 新建一个本地缓存，其中配置定期2秒进行过期检测
+   localCache := NewBuildInMapCache(2*time.Second, func(cache *BuildInMapCache) {
+        cache.onEvicted = func(key string, value any) {
+        
+        }
+   })
+   // 写入一个key，其中过期时间为1ms
+   localCache.Set(context.Background(), "key1", 12, time.Millisecond)
+   // 写入一个key，其中不过期
+   localCache.Set(context.Background(), "key2", 12, 0)
+}
+```
+
+## maxCntCache
+基于本地缓存封装的控制键值对数量缓存
+
+## lruCache
+基于LRU算法实现的本地缓存
 
 ## sync
 
@@ -163,3 +188,5 @@ func main() {
    })
 }
 ```
+
+## 分布式锁的实现
