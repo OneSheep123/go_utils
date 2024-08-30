@@ -172,6 +172,9 @@ func main() {
 ## lruCache
 基于LRU算法实现的本地缓存
 
+## redisLock
+基于redis的分布式锁实现
+
 ## sync
 
 ### once
@@ -188,5 +191,3 @@ func main() {
    })
 }
 ```
-
-## 分布式锁的实现
