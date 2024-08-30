@@ -83,13 +83,33 @@ func (lru *LRUCache) Set(ctx context.Context, key string, value any, expireTime 
 }
 
 func (lru *LRUCache) Delete(ctx context.Context, key string) error {
-	//TODO implement me
-	panic("implement me")
+	lru.delete(key)
+	return nil
+}
+
+func (lru *LRUCache) delete(key string) any {
+	lru.mu.RLock()
+	n, ok := lru.m[key]
+	// 说明当前节点已经被移除
+	if !ok {
+		return nil
+	}
+	lru.mu.RUnlock()
+	lru.mu.Lock()
+	// 双重锁校验()
+	_, ok = lru.m[key]
+	if !ok {
+		return n.val
+	}
+	delete(lru.m, key)
+	n.next.pre = n.pre
+	n.pre.next = n.next
+	lru.mu.Unlock()
+	return n.val
 }
 
 func (lru *LRUCache) LoadAndDelete(ctx context.Context, key string) (any, error) {
-	//TODO implement me
-	panic("implement me")
+	return lru.delete(key), nil
 }
 
 func NewBuildLRUCache(capacity int) *LRUCache {
