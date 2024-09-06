@@ -147,7 +147,8 @@ func ExampleNewDelayQueue() {
 
 ## cache
 
-## localCache
+### localCache
+
 本地缓存实现，其中对于过期键使用惰性删除和过期删除
 
 使用方法:
@@ -166,13 +167,13 @@ func main() {
 }
 ```
 
-## maxCntCache
+### maxCntCache
 基于本地缓存封装的控制键值对数量缓存
 
-## lruCache
+### lruCache
 基于LRU算法实现的本地缓存
 
-## redisLock
+### redisLock
 基于redis的分布式锁实现
 
 ## sync
@@ -189,5 +190,30 @@ func main() {
         xxxx // 相关业务逻辑
         return nil
    })
+}
+```
+
+## ginx
+
+gin工具库
+
+### middleware
+
+#### ratelimit
+
+请求限流中间件，当前有实现基于redis的限流
+
+使用方法: 
+
+```go
+func main() {
+   server := gin.Default()
+   // 创建一个基于 redis 的滑动窗口限流器(1秒只允许有10个请求)
+   lm := ratelimit.NewRedisSlidingWindowLimiter(redisClient, 1 * time.Second, 10)
+   svc := ratelimit.NewBuilder(lm).SetKeyGenFunc(func(*gin.Context) string {
+	   // 设置滑动窗口中限制的ip
+	   return ctx.ClientIp()
+   })
+   server.Use(svc.Build())
 }
 ```
