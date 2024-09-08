@@ -1,7 +1,7 @@
 package ratelimit
 
 import (
-	"go_utils/internal/ratelimit"
+	"go_utils/ratelimit"
 	"log"
 	"net/http"
 	"strings"
