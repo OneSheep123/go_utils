@@ -7,6 +7,16 @@ go工具类，当前提供功能如下
 4. 并发队列（包含：并发阻塞队列、延时队列）
 5. 同步原语
 
+安装
+
+ekit 目前要求 Go >= 1.18。
+
+使用 go get 命令安装：
+
+```shell
+go get github.com/OneSheep123/go_utils
+```
+
 ## list
 
 ### ArrayList
