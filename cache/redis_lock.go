@@ -152,6 +152,7 @@ func (l *Lock) Refresh(ctx context.Context) error {
 
 func (l *Lock) UnLock(ctx context.Context) error {
 	// 使用lua脚本
+	// 为了防止误删到其他的锁，这里我们建议使用 Lua 脚本通过 key 对应的 value（唯一值）来判断
 	res, err := l.c.Eval(ctx, unLockLua, []string{l.key}, l.value).Int64()
 	defer func() {
 		select {
