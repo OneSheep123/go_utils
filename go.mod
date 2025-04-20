@@ -1,6 +1,8 @@
 module go_utils
 
-go 1.21.6
+go 1.23.0
+
+toolchain go1.23.8
 
 require (
 	github.com/IBM/sarama v1.43.3
@@ -12,7 +14,7 @@ require (
 	github.com/stretchr/testify v1.9.0
 	go.uber.org/mock v0.4.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/sync v0.8.0
+	golang.org/x/sync v0.13.0
 	gorm.io/driver/mysql v1.5.7
 	gorm.io/gorm v1.25.12
 )
