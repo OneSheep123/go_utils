@@ -6,7 +6,20 @@ import (
 	"time"
 )
 
-func TestKafkaConsumerV2(t *testing.T) {
+func TestKafkaConsumerV2_1(t *testing.T) {
+	config := sarama.NewConfig()
+	config.Consumer.Return.Errors = true
+	config.Version, _ = sarama.ParseKafkaVersion("0.10.2.1")
+	config.Consumer.Offsets.Initial = sarama.OffsetOldest
+	config.Consumer.Offsets.AutoCommit.Enable = false
+	kafkaAddress := "172.16.3.14:9092"
+	consumerGroup := "cch_test_v2"
+	topic := "cch_test"
+
+	testKafkaConsumer(t, config, kafkaAddress, consumerGroup, topic)
+
+}
+func TestKafkaConsumerV2_2(t *testing.T) {
 	config := sarama.NewConfig()
 	config.Consumer.Return.Errors = true
 	config.Version, _ = sarama.ParseKafkaVersion("0.10.2.1")

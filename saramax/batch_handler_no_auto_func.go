@@ -194,6 +194,7 @@ func (k *KafkaConsumer) close() {
 // KafkaProcessor 实现处理逻辑
 type KafkaProcessor struct {
 	ready       chan struct{}
+	readyOnce   sync.Once
 	msgChannels []chan *sarama.ConsumerMessage
 	offsetChan  chan *partitionOffset
 	closeOnce   sync.Once
@@ -253,11 +254,15 @@ func (p *KafkaProcessor) Close() {
 
 // Setup 处理器的初始化
 func (p *KafkaProcessor) Setup(sarama.ConsumerGroupSession) error {
-	close(p.ready)
+	p.readyOnce.Do(func() {
+		close(p.ready)
+	})
 	return nil
 }
 
 func (p *KafkaProcessor) Cleanup(sarama.ConsumerGroupSession) error {
+	fmt.Println("reassign partitions")
+	p.sessionOnce = sync.Once{}
 	return nil
 }
 
