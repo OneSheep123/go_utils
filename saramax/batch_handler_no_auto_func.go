@@ -182,8 +182,8 @@ func (k *KafkaConsumer) StartConsume(process func(msg *sarama.ConsumerMessage) e
 	fmt.Println("\nShutting down...")
 
 	cancel()
-	k.close()
 	wg.Wait()
+	k.close()
 }
 
 // close 关闭消费者
