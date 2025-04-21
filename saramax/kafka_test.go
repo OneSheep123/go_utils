@@ -33,9 +33,9 @@ func TestKafkaProducer(t *testing.T) {
 		log.Fatalln(err)
 		return
 	}
-	for i := 0; i < 300; i++ {
+	for i := 0; i < 10; i++ {
 		rand.Seed(time.Now().UnixNano())
-		randomNum := rand.Intn(300) + 1
+		randomNum := rand.Intn(10) + 1
 		log.Printf("生成的随机数: %d", randomNum)
 		data := KafkaData{OrderId: fmt.Sprintf("%d", randomNum)}
 		bytes, _ := json.Marshal(data)

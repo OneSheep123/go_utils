@@ -15,8 +15,8 @@ func TestKafkaConsumerV2(t *testing.T) {
 	topic := "cch_test"
 	// 初始化消费者
 	consumer := NewKafkaConsumer([]string{"172.16.3.14:9092"}, []string{topic}, "cch_test_v2", 100, config)
-	consumer.StartConsume(func(msg *Msg) error {
-		t.Log(string(msg.msg.Value))
+	consumer.StartConsume(func(msg *sarama.ConsumerMessage) error {
+		t.Log(string(msg.Value))
 		return nil
 	})
 }

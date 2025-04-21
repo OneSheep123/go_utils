@@ -5,11 +5,11 @@ import (
 	"crypto/sha1"
 	"fmt"
 	"github.com/IBM/sarama"
-	"golang.org/x/sync/errgroup"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 )
 
 const (
@@ -41,7 +41,7 @@ func NewKafkaConsumer(brokers []string, topics []string, consumerGroup string, w
 
 	// 初始化处理器
 	k.Processor = NewKafkaProcessor(k.WorkerChannels)
-
+	k.Processor.SetCommitStep(100)
 	// 配置消费者
 	if config == nil {
 		config := sarama.NewConfig()
@@ -52,9 +52,91 @@ func NewKafkaConsumer(brokers []string, topics []string, consumerGroup string, w
 	k.Config = config
 	return k
 }
+func (k *KafkaConsumer) SetCommitStep(step int) {
+	k.Processor.SetCommitStep(step)
+}
+
+func (k *KafkaConsumer) SetCommitIn(commitInterval time.Duration) {
+	k.Processor.SetCommitIn(commitInterval)
+}
+
+// SetConsumeFromBeginningForTopic 设置从头开始消费
+// 设置从头开始消费
+func (k *KafkaConsumer) SetConsumeFromBeginningForTopic(topic string) {
+	// 创建offset manager
+	client, err := sarama.NewClient(k.Brokers, k.Config)
+	if err != nil {
+		panic(fmt.Sprintf("Error creating client: %v", err))
+	}
+	defer func(client sarama.Client) {
+		err := client.Close()
+		if err != nil {
+			fmt.Printf("Error closing client: %v\n", err)
+		}
+	}(client)
+	// 创建offset manager
+	offsetManager, err := sarama.NewOffsetManagerFromClient(k.ConsumerGroup, client)
+	if err != nil {
+		panic(fmt.Sprintf("Error creating offset manager: %v", err))
+	}
+	defer func(offsetManager sarama.OffsetManager) {
+		err := offsetManager.Close()
+		if err != nil {
+			fmt.Printf("Error closing offset manager: %v\n", err)
+		}
+	}(offsetManager)
+
+	partitions, _ := client.Partitions(topic)
+	for _, partition := range partitions {
+		partitionManager, _ := offsetManager.ManagePartition(topic, partition)
+		partitionManager.ResetOffset(0, "") // 重置到起始位置
+		err := partitionManager.Close()
+		if err != nil {
+			fmt.Printf("Error closing partition manager: %v\n", err)
+		}
+	}
+}
+
+func (k *KafkaConsumer) SetConsumeFromBeginning() {
+	// 创建offset manager
+	client, err := sarama.NewClient(k.Brokers, k.Config)
+	if err != nil {
+		panic(fmt.Sprintf("Error creating client: %v", err))
+	}
+	defer func(client sarama.Client) {
+		err := client.Close()
+		if err != nil {
+			fmt.Printf("Error closing client: %v\n", err)
+		}
+	}(client)
+	// 创建offset manager
+	offsetManager, err := sarama.NewOffsetManagerFromClient(k.ConsumerGroup, client)
+	if err != nil {
+		panic(fmt.Sprintf("Error creating offset manager: %v", err))
+	}
+	defer func(offsetManager sarama.OffsetManager) {
+		err := offsetManager.Close()
+		if err != nil {
+			fmt.Printf("Error closing offset manager: %v\n", err)
+		}
+	}(offsetManager)
+
+	for _, topic := range k.Topics {
+		partitions, _ := client.Partitions(topic)
+		for _, partition := range partitions {
+			partitionManager, _ := offsetManager.ManagePartition(topic, partition)
+			partitionManager.ResetOffset(0, "") // 重置到起始位置
+			err := partitionManager.Close()
+			if err != nil {
+				fmt.Printf("Error closing partition manager: %v\n", err)
+			}
+		}
+	}
+
+}
 
 // StartConsume 启动消费者，调用时传入处理函数
-func (k *KafkaConsumer) StartConsume(process func(msg *Msg) error) {
+func (k *KafkaConsumer) StartConsume(process func(msg *sarama.ConsumerMessage) error) {
 
 	// 创建消费者组
 	consumer, err := sarama.NewConsumerGroup(k.Brokers, k.ConsumerGroup, k.Config)
@@ -100,6 +182,7 @@ func (k *KafkaConsumer) StartConsume(process func(msg *Msg) error) {
 	fmt.Println("\nShutting down...")
 
 	cancel()
+	k.close()
 	wg.Wait()
 }
 
@@ -108,75 +191,51 @@ func (k *KafkaConsumer) close() {
 	k.Processor.Close()
 }
 
-type commitedOffsets struct {
-	m map[string]*partitionOffset
-	sync.RWMutex
-}
-
-func (c *commitedOffsets) getPartitionOffset(partitionStr string) *partitionOffset {
-	c.RLock()
-	defer c.RUnlock()
-	return c.m[partitionStr]
-}
-
-func (c *commitedOffsets) setPartitionOffset(partitionStr string, p *partitionOffset) {
-	c.Lock()
-	c.m[partitionStr] = p
-	c.Unlock()
-}
-
-type Msg struct {
-	msg *sarama.ConsumerMessage
-	// 注意：每个分区对应的session是不一样的
-	session *sarama.ConsumerGroupSession
-}
-
 // KafkaProcessor 实现处理逻辑
 type KafkaProcessor struct {
-	ready                   chan struct{}
-	msgChannels             []chan *Msg
-	offsetChan              chan *partitionOffset
-	closeOnce               sync.Once
-	committedOffsets        commitedOffsets // 维护每个分区最后提交的位移
-	hashFunc                func(msg *sarama.ConsumerMessage) uint32
-	commitGoroutineLimitNum int // 每个管道提交偏移量限制协程数量
-}
-
-func (p *KafkaProcessor) getPartitionOffsetStr(topic string, partition int32) string {
-	return fmt.Sprintf("%s-%d", topic, partition)
+	ready       chan struct{}
+	msgChannels []chan *sarama.ConsumerMessage
+	offsetChan  chan *partitionOffset
+	closeOnce   sync.Once
+	sessionOnce sync.Once
+	session     sarama.ConsumerGroupSession
+	hashFunc    func(msg *sarama.ConsumerMessage) uint32
+	// 提交步长
+	CommitStep int
+	// 提交间隔
+	CommitInterval time.Duration
 }
 
 type partitionOffset struct {
 	Topic     string
 	Partition int32
 	Offset    int64
-	session   *sarama.ConsumerGroupSession
+	Status    bool
 }
 
 func NewKafkaProcessor(workerChannels int) *KafkaProcessor {
 	p := &KafkaProcessor{
-		ready:                   make(chan struct{}),
-		msgChannels:             make([]chan *Msg, workerChannels),
-		offsetChan:              make(chan *partitionOffset, workerChannels*2),
-		committedOffsets:        commitedOffsets{m: make(map[string]*partitionOffset)},
-		commitGoroutineLimitNum: 3,
+		ready:          make(chan struct{}),
+		msgChannels:    make([]chan *sarama.ConsumerMessage, workerChannels),
+		offsetChan:     make(chan *partitionOffset, workerChannels*2),
+		CommitStep:     100,
+		CommitInterval: 3 * time.Second,
 	}
 
 	// 初始化工作通道
 	for i := range p.msgChannels {
-		p.msgChannels[i] = make(chan *Msg, workerChannelLength)
+		p.msgChannels[i] = make(chan *sarama.ConsumerMessage, workerChannelLength)
 	}
 
-	// 启动偏移量提交协程
-	go func() {
-		fmt.Println("start commit worker")
-		err := p.commitWorker()
-		if err != nil {
-			fmt.Printf("Commit worker error: %v\n", err)
-		}
-	}()
-
 	return p
+}
+
+func (p *KafkaProcessor) SetCommitStep(step int) {
+	p.CommitStep = step
+}
+
+func (p *KafkaProcessor) SetCommitIn(commitInterval time.Duration) {
+	p.CommitInterval = commitInterval
 }
 
 func (p *KafkaProcessor) Ready() <-chan struct{} {
@@ -202,12 +261,18 @@ func (p *KafkaProcessor) Cleanup(sarama.ConsumerGroupSession) error {
 	return nil
 }
 
-func (p *KafkaProcessor) StartWorker(process func(msg *Msg) error) {
+func (p *KafkaProcessor) StartWorker(process func(msg *sarama.ConsumerMessage) error) {
 	// 启动工作协程
 	for i := range p.msgChannels {
-		fmt.Println("start msg worker: ", i)
 		go p.worker(i, process)
 	}
+	// 启动偏移量提交协程
+	go func() {
+		err := p.commitWorker()
+		if err != nil {
+			fmt.Printf("Commit worker error: %v\n", err)
+		}
+	}()
 }
 
 // ConsumeClaim
@@ -215,18 +280,16 @@ func (p *KafkaProcessor) StartWorker(process func(msg *Msg) error) {
 // 1. 消费消息
 // 2. 哈希分发到工作通道
 func (p *KafkaProcessor) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
+	p.sessionOnce.Do(func() {
+		p.session = session
+	})
 	for msg := range claim.Messages() {
-		msgPartition := msg.Partition
-		msgOffset := msg.Offset
-		msgTopic := msg.Topic
-		msgPartitionStr := p.getPartitionOffsetStr(msgTopic, msgPartition)
-		if v := p.committedOffsets.getPartitionOffset(msgPartitionStr); v == nil {
-			p.committedOffsets.setPartitionOffset(msgPartitionStr, &partitionOffset{
-				Topic:     msgTopic,
-				Partition: msgPartition,
-				Offset:    msgOffset - 1,
-				session:   &session,
-			})
+		//msgOffset := msg.Offset
+		p.offsetChan <- &partitionOffset{
+			Topic:     msg.Topic,
+			Partition: msg.Partition,
+			Offset:    msg.Offset,
+			Status:    false,
 		}
 		// 哈希分发逻辑
 		// 如果没有自定义哈希函数，则使用默认的哈希函数
@@ -237,12 +300,10 @@ func (p *KafkaProcessor) ConsumeClaim(session sarama.ConsumerGroupSession, claim
 		hashValue := hashFunc(msg)
 
 		chIndex := hashValue % uint32(len(p.msgChannels))
+
+		fmt.Printf("worker %d consume msg topic %s partition %d offset %d\n", chIndex, msg.Topic, msg.Partition, msg.Offset)
 		// 将消息发送到对应的工作通道
-		fmt.Printf("offset: %d 分发消息到通道:%d \n", msgOffset, chIndex)
-		p.msgChannels[chIndex] <- &Msg{
-			msg:     msg,
-			session: &session,
-		}
+		p.msgChannels[chIndex] <- msg
 	}
 	return nil
 }
@@ -264,96 +325,95 @@ func (p *KafkaProcessor) getHashValue(msg *sarama.ConsumerMessage) uint32 {
 }
 
 // 工作协程处理业务逻辑
-func (p *KafkaProcessor) worker(chIndex int, process func(msg *Msg) error) {
-	eg := errgroup.Group{}
-	eg.SetLimit(p.commitGoroutineLimitNum)
+func (p *KafkaProcessor) worker(chIndex int, process func(msg *sarama.ConsumerMessage) error) {
 	for msg := range p.msgChannels[chIndex] {
 		// 业务处理逻辑
 		if err := process(msg); err == nil {
 			// 处理成功后提交偏移量
-			fmt.Println("发送偏移量:", msg.msg.Partition, msg.msg.Offset)
-			eg.Go(func() error {
-				p.offsetChan <- &partitionOffset{
-					Topic:     msg.msg.Topic,
-					Partition: msg.msg.Partition,
-					Offset:    msg.msg.Offset,
-					session:   msg.session,
-				}
-				return nil
-			})
+			p.offsetChan <- &partitionOffset{
+				Topic:     msg.Topic,
+				Partition: msg.Partition,
+				Offset:    msg.Offset,
+				Status:    true,
+			}
 		}
 	}
 }
 
 // 提交偏移量的工作协程
 func (p *KafkaProcessor) commitWorker() error {
-	// 缓存未按顺序到达的位移
-	pendingOffsets := make(map[string][]int64)
+	// 记录每个分区当前可提交的最大偏移量
+	partitionMap := make(map[string]*partitionOffset)
+	// 记录上一次已提交的偏移量
+	lastPartitionMap := make(map[string]*partitionOffset)
+	// 记录每个分区中已成功处理的偏移量(true表示已处理)
+	partitionOffsets := make(map[string]map[int64]bool)
+	// 记录每个分区待处理的偏移量队列
+	offsets := make(map[string][]int64)
+
+	ticker := time.NewTicker(p.CommitInterval) // 兜底提交间隔
+	defer ticker.Stop()
 	for {
 		select {
+		case <-ticker.C:
+			// 定时提交
+			for partitionStr, pOffset := range partitionMap {
+				fmt.Printf("定时执行 topic %s offset %d,lastoffset %d \n", partitionStr, pOffset.Offset, lastPartitionMap[partitionStr].Offset)
+				if pOffset.Offset > lastPartitionMap[partitionStr].Offset {
+					p.commit(pOffset)
+					lastPartitionMap[partitionStr].Offset = pOffset.Offset
+					fmt.Printf("定时提交 topic %s partition %d offset %d\n", pOffset.Topic, pOffset.Partition, pOffset.Offset)
+				}
+			}
+			break
 		case parOffset, ok := <-p.offsetChan:
 			if !ok {
+				// 通道关闭
 				return nil
 			}
-			fmt.Println("获取偏移量:", parOffset)
 			currentPartition := parOffset.Partition
 			currentOffset := parOffset.Offset
 			currentTopic := parOffset.Topic
-			currentPartitionStr := p.getPartitionOffsetStr(currentTopic, currentPartition)
-			var lastCommitted *partitionOffset
-			var session *sarama.ConsumerGroupSession
-			// 1. 获取该分区最后提交的位移
-			if v := p.committedOffsets.getPartitionOffset(currentPartitionStr); v == nil {
-				//异常报错
-				fmt.Println("分区不存在:", currentPartition)
-				return nil
-			} else {
-				lastCommitted = v
-				session = v.session
+			currentStatus := parOffset.Status
+			currentPartitionStr := fmt.Sprintf("%s-%d", currentTopic, currentPartition)
+			if _, exists := partitionMap[currentPartitionStr]; !exists {
+				partitionMap[currentPartitionStr] = &partitionOffset{Topic: currentTopic, Partition: currentPartition, Offset: currentOffset - 1}
 			}
-			// 2. 如果是期望的下一个位移
-			if currentOffset == lastCommitted.Offset+1 {
-				currentPartitionOffset := &partitionOffset{Topic: currentTopic, Partition: currentPartition, Offset: currentOffset, session: session}
-				// 提交位移
-				p.commit(currentPartitionOffset)
-				// 更新最后提交的位移
-				p.committedOffsets.setPartitionOffset(currentPartitionStr, currentPartitionOffset)
-				// 3. 检查是否有缓存的后续位移可以提交
-				for {
-					nextOffset := p.committedOffsets.getPartitionOffset(currentPartitionStr).Offset + 1
-					if pending, ok := pendingOffsets[currentPartitionStr]; ok {
-						found := false
-						for i, pendingOffset := range pending {
-							if pendingOffset == nextOffset {
-								// 提交这个缓存的位移
-								currentPartitionOffset = &partitionOffset{Topic: currentTopic, Partition: currentPartition, Offset: pendingOffset, session: session}
-								p.commit(currentPartitionOffset)
-								// 更新最后提交的位移
-								p.committedOffsets.setPartitionOffset(currentPartitionStr, currentPartitionOffset)
-								// 从缓存中删除
-								pendingOffsets[currentPartitionStr] = append(pending[:i], pending[i+1:]...)
-								found = true
-								break
-							}
-						}
-						if !found {
-							break
-						}
-					} else {
-						break
-					}
+			if _, exists := lastPartitionMap[currentPartitionStr]; !exists {
+				lastPartitionMap[currentPartitionStr] = &partitionOffset{Topic: currentTopic, Partition: currentPartition, Offset: currentOffset - 1}
+			}
+			if _, exists := partitionOffsets[currentPartitionStr]; !exists {
+				partitionOffsets[currentPartitionStr] = make(map[int64]bool)
+			}
+			if _, exists := offsets[currentPartitionStr]; !exists {
+				offsets[currentPartitionStr] = make([]int64, 0)
+			}
+
+			if currentStatus == false {
+				offsets[currentPartitionStr] = append(offsets[currentPartitionStr], currentOffset)
+				continue
+			}
+			partitionOffsets[currentPartitionStr][currentOffset] = true
+			// 检查待处理队列，找出连续成功处理的最大偏移量
+			maxOffsetIndex := -1
+			for index, offset := range offsets[currentPartitionStr] {
+				if _, exists := partitionOffsets[currentPartitionStr][offset]; exists {
+					partitionMap[currentPartitionStr].Offset = offset
+					maxOffsetIndex = index
+					// 释放已提交的偏移量
+					delete(partitionOffsets[currentPartitionStr], offset)
+				} else {
+					break
 				}
-			} else {
-				// 4. 不是期望的下一个位移，先缓存起来
-				if currentOffset > lastCommitted.Offset+1 {
-					if _, ok = pendingOffsets[currentPartitionStr]; !ok {
-						pendingOffsets[currentPartitionStr] = make([]int64, 0)
-					}
-					pendingOffsets[currentPartitionStr] = append(pendingOffsets[currentPartitionStr], currentOffset)
-					fmt.Printf("缓存位移 topic:%s, partition:%d offset:%d (等待:%d)\n",
-						currentTopic, currentPartition, currentOffset, lastCommitted.Offset+1)
+			}
+			if maxOffsetIndex > -1 {
+				// 删除offsets在maxOffsetIndex之前的元素
+				offsets[currentPartitionStr] = offsets[currentPartitionStr][maxOffsetIndex+1:]
+				// 提交偏移量
+				if partitionMap[currentPartitionStr].Offset >= lastPartitionMap[currentPartitionStr].Offset+int64(p.CommitStep) {
+					p.commit(partitionMap[currentPartitionStr])
+					lastPartitionMap[currentPartitionStr].Offset = partitionMap[currentPartitionStr].Offset
 				}
-				// 小于等于lastCommitted的位移直接忽略（已经提交过了）
 			}
 		}
 	}
@@ -362,8 +422,8 @@ func (p *KafkaProcessor) commitWorker() error {
 // 提交处理
 func (p *KafkaProcessor) commit(tracker *partitionOffset) {
 	// 按分区维护最大偏移量
-	fmt.Printf("------------------提交 topic %s partition %d offset %d\n", tracker.Topic, tracker.Partition, tracker.Offset+1)
+	fmt.Printf("提交 topic %s partition %d offset %d\n", tracker.Topic, tracker.Partition, tracker.Offset)
 	// 实际提交代码示例：
-	(*tracker.session).MarkOffset(tracker.Topic, tracker.Partition, tracker.Offset+1, "")
-	(*tracker.session).Commit()
+	p.session.MarkOffset(tracker.Topic, tracker.Partition, tracker.Offset+1, "")
+	p.session.Commit()
 }
