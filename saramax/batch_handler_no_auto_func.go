@@ -193,18 +193,17 @@ func (k *KafkaConsumer) close() {
 
 // KafkaProcessor 实现处理逻辑
 type KafkaProcessor struct {
-	ready       chan struct{}
-	readyOnce   sync.Once
-	msgChannels []chan *sarama.ConsumerMessage
-	offsetChan  chan *partitionOffset
-	closeOnce   sync.Once
-	sessionOnce sync.Once
-	session     sarama.ConsumerGroupSession
-	hashFunc    func(msg *sarama.ConsumerMessage) uint32
-	// 提交步长
-	CommitStep int
-	// 提交间隔
-	CommitInterval time.Duration
+	ready            chan struct{}
+	commitWorkReInit chan struct{}
+	readyOnce        sync.Once
+	msgChannels      []chan *sarama.ConsumerMessage
+	offsetChan       chan *partitionOffset
+	closeOnce        sync.Once
+	sessionOnce      sync.Once
+	session          sarama.ConsumerGroupSession
+	hashFunc         func(msg *sarama.ConsumerMessage) uint32
+	CommitStep       int           // 提交步长
+	CommitInterval   time.Duration // 提交间隔
 }
 
 type partitionOffset struct {
@@ -216,11 +215,12 @@ type partitionOffset struct {
 
 func NewKafkaProcessor(workerChannels int) *KafkaProcessor {
 	p := &KafkaProcessor{
-		ready:          make(chan struct{}),
-		msgChannels:    make([]chan *sarama.ConsumerMessage, workerChannels),
-		offsetChan:     make(chan *partitionOffset, workerChannels*2),
-		CommitStep:     100,
-		CommitInterval: 3 * time.Second,
+		ready:            make(chan struct{}),
+		commitWorkReInit: make(chan struct{}, 1),
+		msgChannels:      make([]chan *sarama.ConsumerMessage, workerChannels),
+		offsetChan:       make(chan *partitionOffset, workerChannels*2),
+		CommitStep:       100,
+		CommitInterval:   3 * time.Second,
 	}
 
 	// 初始化工作通道
@@ -263,6 +263,7 @@ func (p *KafkaProcessor) Setup(sarama.ConsumerGroupSession) error {
 func (p *KafkaProcessor) Cleanup(sarama.ConsumerGroupSession) error {
 	fmt.Println("reassign partitions")
 	p.sessionOnce = sync.Once{}
+	p.commitWorkReInit <- struct{}{}
 	return nil
 }
 
@@ -420,6 +421,13 @@ func (p *KafkaProcessor) commitWorker() error {
 					lastPartitionMap[currentPartitionStr].Offset = partitionMap[currentPartitionStr].Offset
 				}
 			}
+		case <-p.commitWorkReInit:
+			// 重新初始化
+			fmt.Println("重新初始化")
+			partitionMap = make(map[string]*partitionOffset)
+			lastPartitionMap = make(map[string]*partitionOffset)
+			partitionOffsets = make(map[string]map[int64]bool)
+			offsets = make(map[string][]int64)
 		}
 	}
 }
