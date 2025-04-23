@@ -232,3 +232,9 @@ func main() {
    server.Use(svc.Build())
 }
 ```
+## saramax
+
+kafka saramx工具库
+
+### [batch_handler_no_auto_func.go](saramax%2Fbatch_handler_no_auto_func.go)
+批量消费kafka消息，且手动提交
