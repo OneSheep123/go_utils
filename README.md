@@ -237,4 +237,4 @@ func main() {
 kafka saramx工具库
 
 ### [batch_handler_no_auto_func.go](saramax%2Fbatch_handler_no_auto_func.go)
-批量消费kafka消息，且手动提交
+基于 Sarama 的 Kafka 消费者批量处理框架，支持手动提交 offset，且支持多 worker 并发消费、哈希分发、消费幂等和高效批量提交

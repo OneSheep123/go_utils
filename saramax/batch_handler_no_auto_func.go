@@ -395,12 +395,13 @@ func (p *KafkaProcessor) commitWorker() error {
 				offsets[currentPartitionStr] = make([]int64, 0)
 			}
 
+			// 消息再未处理之前（currentStatus = false），会走到这里，然后offsets中分区的数据其实是有序的
 			if currentStatus == false {
 				offsets[currentPartitionStr] = append(offsets[currentPartitionStr], currentOffset)
 				continue
 			}
 			partitionOffsets[currentPartitionStr][currentOffset] = true
-			// 检查待处理队列，找出连续成功处理的最大偏移量
+			// 检查待处理队列，找出连续成功处理的最大偏移量（注意：得是连续成功）
 			maxOffsetIndex := -1
 			for index, offset := range offsets[currentPartitionStr] {
 				if _, exists := partitionOffsets[currentPartitionStr][offset]; exists {
